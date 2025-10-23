@@ -34,7 +34,9 @@ def confirm_action(action_name):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            response = input(CONFIRM_MESSAGES["CONFIRM_ACTION"].format(action_name)).strip().lower()
+            template = '❓ Вы уверены, что хотите выполнить "{}"? [y/n]: '
+            prompt = template.format(action_name)
+            response = input(prompt).strip().lower()
             if response == 'y':
                 return func(*args, **kwargs)
             else:
@@ -54,7 +56,8 @@ def log_time(func):
         result = func(*args, **kwargs)
         end_time = time.monotonic()
         execution_time = end_time - start_time
-        print(f"⏱️  Функция {func.__name__} выполнилась за {execution_time:.3f} секунд")
+        msg = f"⏱️  Функция {func.__name__} выполнилась за {execution_time:.3f} секунд"
+        print(msg)
         return result
     return wrapper
 
@@ -67,12 +70,14 @@ def create_cacher():
     
     def cache_result(key, value_func):
         if key in cache:
-            print(f"♻️  Используем кэшированный результат для ключа: {key}")
+            msg = f"♻️  Используем кэшированный результат для ключа: {key}"
+            print(msg)
             return cache[key]
         else:
             value = value_func()
             cache[key] = value
-            print(f"💾 Сохраняем в кэш для ключа: {key}")
+            msg = f"💾 Сохраняем в кэш для ключа: {key}"
+            print(msg)
             return value
     
     return cache_result

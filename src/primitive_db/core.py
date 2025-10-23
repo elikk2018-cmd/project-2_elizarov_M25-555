@@ -101,7 +101,9 @@ def insert(metadata, table_name, values_str):
 
     # Проверяем количество значений
     if len(values) != len(data_columns):
-        print(f'❌ Ошибка: Ожидалось {len(data_columns)} значений, получено {len(values)}.')
+        expected = len(data_columns)
+        received = len(values)
+        print(f'❌ Ошибка: Ожидалось {expected} значений, получено {received}.')
         return
 
     # Загружаем существующие данные
@@ -130,7 +132,8 @@ def insert(metadata, table_name, values_str):
                 elif value.lower() in ['false', '0', 'no', 'нет']:
                     new_record[column] = False
                 else:
-                    raise ValueError(f"Некорректное булево значение: {value}")
+                    msg = f"Некорректное булево значение: {value}"
+                    raise ValueError(msg)
             else:  # str
                 if (value.startswith('"') and value.endswith('"')) or \
                    (value.startswith("'") and value.endswith("'")):
@@ -143,7 +146,8 @@ def insert(metadata, table_name, values_str):
     # Добавляем запись и сохраняем
     table_data.append(new_record)
     save_table_data(table_name, table_data)
-    print(f'✅ Запись с ID={new_id} успешно добавлена в таблицу "{table_name}".')
+    msg = f'✅ Запись с ID={new_id} успешно добавлена в таблицу "{table_name}".'
+    print(msg)
 
 
 def _perform_select(metadata, table_name, where_clause=None):
@@ -239,7 +243,8 @@ def update(metadata, table_name, set_clause, where_clause):
                     elif new_value.lower() in ['false', '0', 'no', 'нет']:
                         record[set_column] = False
                     else:
-                        raise ValueError(f"Некорректное булево значение: {new_value}")
+                        msg = f"Некорректное булево значение: {new_value}"
+                        raise ValueError(msg)
                 else:  # str
                     record[set_column] = new_value
                 updated_count += 1
@@ -249,7 +254,8 @@ def update(metadata, table_name, set_clause, where_clause):
 
     if updated_count > 0:
         save_table_data(table_name, table_data)
-        print(f'✅ Обновлено {updated_count} записей в таблице "{table_name}".')
+        msg = f'✅ Обновлено {updated_count} записей в таблице "{table_name}".'
+        print(msg)
     else:
         print('❌ Записи для обновления не найдены.')
 
@@ -281,7 +287,8 @@ def delete(metadata, table_name, where_clause):
 
     if deleted_count > 0:
         save_table_data(table_name, table_data)
-        print(f'✅ Удалено {deleted_count} записей из таблицы "{table_name}".')
+        msg = f'✅ Удалено {deleted_count} записей из таблицы "{table_name}".'
+        print(msg)
     else:
         print('❌ Записи для удаления не найдены.')
 
