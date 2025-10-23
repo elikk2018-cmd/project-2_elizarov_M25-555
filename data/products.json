@@ -1,0 +1,14 @@
+[
+  {
+    "ID": 1,
+    "name": "Телефон",
+    "price": 500,
+    "in_stock": true
+  },
+  {
+    "ID": 2,
+    "name": "Ноутбук",
+    "price": 1000,
+    "in_stock": false
+  }
+]

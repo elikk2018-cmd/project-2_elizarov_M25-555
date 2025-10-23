@@ -1,9 +1,9 @@
 """
 Основной модуль бизнес-логики базы данных.
-Содержит функции для работы с таблицами и данными.
 """
 
 from .constants import (
+    CACHE_ENABLED,
     ERROR_MESSAGE_INVALID_COLUMN_FORMAT,
     ERROR_MESSAGE_INVALID_TYPE,
     ERROR_MESSAGE_TABLE_EXISTS,
@@ -12,9 +12,12 @@ from .constants import (
     SUCCESS_MESSAGE_TABLE_DROPPED,
     VALID_TYPES,
 )
-from .utils import save_metadata
+from .decorators import cacher, confirm_action, handle_db_errors, log_time
+from .parser import parse_values
+from .utils import load_table_data, save_metadata, save_table_data
 
 
+@handle_db_errors
 def create_table(metadata, table_name, columns):
     """
     Создает новую таблицу в базе данных.
@@ -23,10 +26,8 @@ def create_table(metadata, table_name, columns):
         print(ERROR_MESSAGE_TABLE_EXISTS.format(table_name))
         return metadata
 
-    # Добавляем автоматический столбец ID
     columns_with_id = [('ID', 'int')]
 
-    # Парсим и проверяем столбцы
     for column in columns:
         try:
             col_name, col_type = column.split(':')
@@ -38,11 +39,9 @@ def create_table(metadata, table_name, columns):
             print(ERROR_MESSAGE_INVALID_COLUMN_FORMAT.format(column))
             return metadata
 
-    # Создаем структуру таблицы
     table_structure = {col[0]: col[1] for col in columns_with_id}
     metadata[table_name] = table_structure
 
-    # Формируем сообщение об успехе
     columns_str = ", ".join([f"{col[0]}:{col[1]}" for col in columns_with_id])
     print(SUCCESS_MESSAGE_TABLE_CREATED.format(table_name, columns_str))
 
@@ -50,6 +49,8 @@ def create_table(metadata, table_name, columns):
     return metadata
 
 
+@handle_db_errors
+@confirm_action("удаление таблицы")
 def drop_table(metadata, table_name):
     """
     Удаляет таблицу из базы данных.
@@ -65,152 +66,165 @@ def drop_table(metadata, table_name):
     return metadata
 
 
+@handle_db_errors
 def list_tables(metadata):
     """
     Выводит список всех таблиц в базе данных.
     """
     if not metadata:
-        print("Нет созданных таблиц.")
+        print("📭 Нет созданных таблиц.")
     else:
+        print("📋 Список таблиц:")
         for table_name in metadata:
-            print(f"- {table_name}")
+            print(f"  - {table_name}")
 
 
+@handle_db_errors
+@log_time
 def insert(metadata, table_name, values_str):
     """
     Вставляет данные в таблицу.
     """
     if table_name not in metadata:
-        print(f'Ошибка: Таблица "{table_name}" не существует.')
+        print(f'❌ Ошибка: Таблица "{table_name}" не существует.')
         return
-    
-    from .parser import parse_values
-    from .utils import load_table_data, save_table_data
-    
+
     # Парсим значения
     try:
         values = parse_values(values_str)
     except Exception as e:
-        print(f'Ошибка парсинга значений: {e}')
+        print(f'❌ Ошибка парсинга значений: {e}')
         return
-    
+
     table_structure = metadata[table_name]
     data_columns = [col for col in table_structure.keys() if col != 'ID']
-    
+
     # Проверяем количество значений
     if len(values) != len(data_columns):
-        print(f'Ошибка: Ожидалось {len(data_columns)} значений, получено {len(values)}.')
+        print(f'❌ Ошибка: Ожидалось {len(data_columns)} значений, получено {len(values)}.')
         return
-    
+
     # Загружаем существующие данные
     table_data = load_table_data(table_name)
-    
+
     # Генерируем новый ID
     if table_data:
         new_id = max(item['ID'] for item in table_data) + 1
     else:
         new_id = 1
-    
+
     # Создаем новую запись
     new_record = {'ID': new_id}
-    
+
     # Валидируем и преобразуем значения
     for i, column in enumerate(data_columns):
         value = values[i]
         col_type = table_structure[column]
-        
+
         try:
             if col_type == 'int':
                 new_record[column] = int(value)
             elif col_type == 'bool':
-                if value.lower() in ['true', '1', 'yes']:
+                if value.lower() in ['true', '1', 'yes', 'да']:
                     new_record[column] = True
-                elif value.lower() in ['false', '0', 'no']:
+                elif value.lower() in ['false', '0', 'no', 'нет']:
                     new_record[column] = False
                 else:
                     raise ValueError(f"Некорректное булево значение: {value}")
             else:  # str
-                # Убираем кавычки если они есть
                 if (value.startswith('"') and value.endswith('"')) or \
                    (value.startswith("'") and value.endswith("'")):
                     value = value[1:-1]
                 new_record[column] = value
         except ValueError as e:
-            print(f'Ошибка преобразования типа для столбца {column}: {e}')
+            print(f'❌ Ошибка преобразования типа для столбца {column}: {e}')
             return
-    
+
     # Добавляем запись и сохраняем
     table_data.append(new_record)
     save_table_data(table_name, table_data)
-    print(f'Запись с ID={new_id} успешно добавлена в таблицу "{table_name}".')
+    print(f'✅ Запись с ID={new_id} успешно добавлена в таблицу "{table_name}".')
 
 
-def select(metadata, table_name, where_clause=None):
+def _perform_select(metadata, table_name, where_clause=None):
     """
-    Выбирает данные из таблицы.
+    Внутренняя функция для выполнения SELECT (отделена для кэширования).
     """
-    if table_name not in metadata:
-        print(f'Ошибка: Таблица "{table_name}" не существует.')
-        return
-    
     from prettytable import PrettyTable
 
     from .utils import load_table_data
-    
+
     table_data = load_table_data(table_name)
-    
+
     if not table_data:
-        print("Таблица пуста.")
+        print("📭 Таблица пуста.")
         return
-    
+
     # Фильтруем данные если есть условие
     if where_clause:
         column, value = where_clause
         filtered_data = []
         for record in table_data:
-            # Преобразуем значение для сравнения
             record_value = record.get(column)
             if str(record_value) == value:
                 filtered_data.append(record)
         table_data = filtered_data
-    
+
     # Создаем красивую таблицу для вывода
     table = PrettyTable()
     table.field_names = metadata[table_name].keys()
-    
+
     for record in table_data:
         row = [record.get(field, '') for field in table.field_names]
         table.add_row(row)
-    
+
     print(table)
 
 
+@handle_db_errors
+@log_time
+def select(metadata, table_name, where_clause=None):
+    """
+    Выбирает данные из таблицы.
+    """
+    if table_name not in metadata:
+        print(f'❌ Ошибка: Таблица "{table_name}" не существует.')
+        return
+
+    # Используем кэширование для часто выполняемых запросов
+    if CACHE_ENABLED and where_clause:
+        cache_key = f"select_{table_name}_{where_clause[0]}_{where_clause[1]}"
+        cacher(cache_key, lambda: _perform_select(metadata, table_name, where_clause))
+    else:
+        _perform_select(metadata, table_name, where_clause)
+
+
+@handle_db_errors
+@log_time
 def update(metadata, table_name, set_clause, where_clause):
     """
     Обновляет данные в таблице.
     """
     if table_name not in metadata:
-        print(f'Ошибка: Таблица "{table_name}" не существует.')
+        print(f'❌ Ошибка: Таблица "{table_name}" не существует.')
         return
-    
-    from .utils import load_table_data, save_table_data
-    
+
     table_data = load_table_data(table_name)
     table_structure = metadata[table_name]
     updated_count = 0
-    
+
     set_column, new_value = set_clause
     where_column, where_value = where_clause
-    
+
     # Проверяем существование столбцов
     if set_column not in table_structure:
-        print(f'Ошибка: Столбец "{set_column}" не существует.')
+        print(f'❌ Ошибка: Столбец "{set_column}" не существует.')
         return
-    
+
     if where_column not in table_structure:
-        print(f'Ошибка: Столбец "{where_column}" не существует.')
+        print(f'❌ Ошибка: Столбец "{where_column}" не существует.')
         return
-    
+
     # Обновляем записи
     for record in table_data:
         if str(record.get(where_column)) == where_value:
@@ -220,9 +234,9 @@ def update(metadata, table_name, set_clause, where_clause):
                 if col_type == 'int':
                     record[set_column] = int(new_value)
                 elif col_type == 'bool':
-                    if new_value.lower() in ['true', '1', 'yes']:
+                    if new_value.lower() in ['true', '1', 'yes', 'да']:
                         record[set_column] = True
-                    elif new_value.lower() in ['false', '0', 'no']:
+                    elif new_value.lower() in ['false', '0', 'no', 'нет']:
                         record[set_column] = False
                     else:
                         raise ValueError(f"Некорректное булево значение: {new_value}")
@@ -230,61 +244,61 @@ def update(metadata, table_name, set_clause, where_clause):
                     record[set_column] = new_value
                 updated_count += 1
             except ValueError as e:
-                print(f'Ошибка преобразования типа: {e}')
+                print(f'❌ Ошибка преобразования типа: {e}')
                 return
-    
+
     if updated_count > 0:
         save_table_data(table_name, table_data)
-        print(f'Обновлено {updated_count} записей в таблице "{table_name}".')
+        print(f'✅ Обновлено {updated_count} записей в таблице "{table_name}".')
     else:
-        print('Записи для обновления не найдены.')
+        print('❌ Записи для обновления не найдены.')
 
 
+@handle_db_errors
+@confirm_action("удаление записей")
+@log_time
 def delete(metadata, table_name, where_clause):
     """
     Удаляет данные из таблицы.
     """
     if table_name not in metadata:
-        print(f'Ошибка: Таблица "{table_name}" не существует.')
+        print(f'❌ Ошибка: Таблица "{table_name}" не существует.')
         return
-    
-    from .utils import load_table_data, save_table_data
-    
+
     table_data = load_table_data(table_name)
     where_column, where_value = where_clause
-    
+
     if where_column not in metadata[table_name]:
-        print(f'Ошибка: Столбец "{where_column}" не существует.')
+        print(f'❌ Ошибка: Столбец "{where_column}" не существует.')
         return
-    
-    # Фильтруем записи (оставляем те, которые НЕ соответствуют условию)
+
+    # Фильтруем записи
     original_count = len(table_data)
     table_data = [record for record in table_data 
                  if str(record.get(where_column)) != where_value]
-    
+
     deleted_count = original_count - len(table_data)
-    
+
     if deleted_count > 0:
         save_table_data(table_name, table_data)
-        print(f'Удалено {deleted_count} записей из таблицы "{table_name}".')
+        print(f'✅ Удалено {deleted_count} записей из таблицы "{table_name}".')
     else:
-        print('Записи для удаления не найдены.')
+        print('❌ Записи для удаления не найдены.')
 
 
+@handle_db_errors
 def info(metadata, table_name):
     """
     Показывает информацию о таблице.
     """
     if table_name not in metadata:
-        print(f'Ошибка: Таблица "{table_name}" не существует.')
+        print(f'❌ Ошибка: Таблица "{table_name}" не существует.')
         return
-    
-    from .utils import load_table_data
-    
+
     table_structure = metadata[table_name]
     table_data = load_table_data(table_name)
-    
-    print(f'Таблица: {table_name}')
+
+    print(f'📊 Таблица: {table_name}')
     columns_str = ", ".join([f"{col}:{typ}" for col, typ in table_structure.items()])
-    print(f'Столбцы: {columns_str}')
-    print(f'Количество записей: {len(table_data)}')
+    print(f'📝 Столбцы: {columns_str}')
+    print(f'📈 Количество записей: {len(table_data)}')

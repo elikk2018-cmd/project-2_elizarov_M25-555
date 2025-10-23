@@ -19,3 +19,18 @@ SUCCESS_MESSAGE_TABLE_CREATED = 'Таблица "{}" успешно создан
 SUCCESS_MESSAGE_TABLE_DROPPED = 'Таблица "{}" успешно удалена.'
 ERROR_MESSAGE_INVALID_TYPE = 'Ошибка: Неподдерживаемый тип данных "{}".'
 ERROR_MESSAGE_INVALID_COLUMN_FORMAT = 'Ошибка: Некорректный формат столбца "{}".'
+# Сообщения для декораторов
+CONFIRM_MESSAGES = {
+    "CONFIRM_ACTION": '❓ Вы уверены, что хотите выполнить "{}"? [y/n]: ',
+    "ACTION_CANCELLED": "❌ Операция отменена."
+}
+
+ERROR_MESSAGES = {
+    "FILE_NOT_FOUND": "❌ Ошибка: Файл данных не найден.",
+    "KEY_ERROR": "❌ Ошибка: Не найден ключ {}.",
+    "VALUE_ERROR": "❌ Ошибка валидации: {}.",
+    "UNEXPECTED_ERROR": "❌ Непредвиденная ошибка: {}."
+}
+
+# Кэширование
+CACHE_ENABLED = True
